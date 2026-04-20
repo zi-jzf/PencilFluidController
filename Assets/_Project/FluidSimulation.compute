@@ -1,0 +1,61 @@
+#pragma kernel InitParticles
+#pragma kernel UpdateParticles
+
+// 共通の構造体を一致させる
+struct ParticleData
+{
+    float3 position;
+    float3 velocity;
+    float2 intialUV; 
+};
+
+// バッファ
+RWStructuredBuffer<ParticleData> _ParticleBuffer;
+
+// パラメータ
+uint _ParticleCount;
+float _DeltaTime;
+
+// 仮のテスト用：マウスインタラクション
+float3 _MousePosition;
+float3 _MouseVelocity; //ドラッグによる力のベクトル
+float _InteractionRadius;
+float _InteractionForce;
+
+[numthreads(256,1,1)]
+void InitParticles (uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= _ParticleCount) return;
+
+    // 初期化処理
+    ParticleData p = _ParticleBuffer[id.x];
+    p.velocity = float3(0.0f,0.0f,0.0f);
+    // positionとinitialUVはC#側で初期化して渡すか、ここで計算する
+    _ParticleBuffer[id.x] = p;
+}
+
+[numthreads(256, 1, 1)]
+void UpdateParticles(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= _ParticleCount) return;
+
+    ParticleData p = _ParticleBuffer[id.x];
+
+    //マウス入力による外力の計算
+    float dist = distance(p.position, _MousePosition);
+    if(dist < _InteractionRadius)
+    {
+        //距離に応じた影響度合い
+        float influence = 1.0f - (dist / _InteractionRadius);
+        p.velocity += _MouseVelocity * influence * _InteractionForce * _DeltaTime;
+    }
+
+    //減衰
+    p.velocity *= 0.98f;
+
+    //移流
+    p.position += p.velocity * _DeltaTime;
+
+    //バッファに書き戻し
+    _ParticleBuffer[id.x] = p;
+}
