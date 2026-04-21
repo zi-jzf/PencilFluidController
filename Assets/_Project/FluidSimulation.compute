@@ -6,11 +6,17 @@ struct ParticleData
 {
     float3 position;
     float3 velocity;
-    float2 intialUV; 
+    float2 initialUV;
+    float4 color;
 };
 
 // バッファ
 RWStructuredBuffer<ParticleData> _ParticleBuffer;
+
+//画像読み込み用
+Texture2D<float4> _MainTex;
+uint2 _Resolution;
+float _CanvasSize;
 
 // パラメータ
 uint _ParticleCount;
@@ -18,7 +24,7 @@ float _DeltaTime;
 
 // 仮のテスト用：マウスインタラクション
 float3 _MousePosition;
-float3 _MouseVelocity; //ドラッグによる力のベクトル
+float3 _MouseVelocity;
 float _InteractionRadius;
 float _InteractionForce;
 
@@ -29,8 +35,23 @@ void InitParticles (uint3 id : SV_DispatchThreadID)
 
     // 初期化処理
     ParticleData p = _ParticleBuffer[id.x];
+
+    //1次元のインデックスから画像のXYピクセル座標を逆算
+    uint px = id.x % _Resolution.x;
+    uint py = id.x / _Resolution.x;
+
+    //UV座標の計算
+    float2 uv = float2((float)px / _Resolution.x, (float)py / _Resolution.y);
+    
+    //テクスチャからピクセルの色を直接取得
+    p.color = _MainTex[uint2(px,py)];
+    p.initialUV = uv;
     p.velocity = float3(0.0f,0.0f,0.0f);
-    // positionとinitialUVはC#側で初期化して渡すか、ここで計算する
+
+    //アスペクト比を考慮したワールド座標への配置(中心が原点)
+    float aspect = (float)_Resolution.x / _Resolution.y;
+    p.position = float3((uv.x - 0.5) * aspect, uv.y - 0.5, 0) * _CanvasSize;
+
     _ParticleBuffer[id.x] = p;
 }
 
