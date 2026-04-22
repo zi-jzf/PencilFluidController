@@ -63,20 +63,52 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
 
     ParticleData p = _ParticleBuffer[id.x];
 
-    //マウス入力による外力の計算
+    //マウス入力による外力の計算(押し出し＋渦)
     float dist = distance(p.position, _MousePosition);
     if(dist < _InteractionRadius)
     {
-        //距離に応じた影響度合い
-        float influence = 1.0f - (dist / _InteractionRadius);
-        p.velocity += _MouseVelocity * influence * _InteractionForce * _DeltaTime;
+        //距離に応じた影響度合い(smoothstepを使用して滑らかに)
+        float influence = smoothstep(_InteractionRadius, 0.0, dist);
+
+        //押し出す力
+        float3 pushForce = _MouseVelocity * influence * _InteractionForce;
+
+        //渦を巻く力(Z軸との外積を取り、マウス進行方向の横向きのベクトルを作る)
+        float3 swirlDirection = cross(float3(0,0,1), normalize(_MouseVelocity + float3(0.001,0,0)));
+        
+        //渦の強さはマウス速度の長さに比例させる
+        float swirlForce = swirlDirection * length(_MouseVelocity) * influence * _InteractionForce * 0.8;
+
+        //合算して適用
+        p.velocity += (pushForce + swirlForce) * _DeltaTime;
     }
 
+    //元の位置へゆっくり戻る力
+    //初期UVから本来あるべきワールド座標を再計算
+    float aspect = (float)_ResolutionX / _ResolutionY;
+    float3 originalPos = float3((p.initialUV.x - 0.5) * aspect, p.initialUV.y - 0.5, 0) * _CanvasSize;
+
+    //元の位置に向かって引っ張る力
+    float3 returnForce = (originalPos - p.position) * 1.5;
+    p.velocity += returnForce * _DeltaTime;
+
     //減衰
-    p.velocity *= 0.98f;
+    p.velocity *= 0.95f;
 
     //移流
     p.position += p.velocity * _DeltaTime;
+
+
+    //キャンバス境界の壁
+    float halfHeight = _CanvasSize * 0.5;
+    float halfWidth = halfHeight * aspect;
+
+    //画面外に出たら位置をクランプして、速度を反転させて跳ね返す
+    if(p.position.x < -halfWidth)  {p.position.x = -halfWidth;  p.velocity.x *= -0.5;}
+    if(p.position.x > halfWidth)   {p.position.x = halfWidth;   p.velocity.x *= -0.5;}
+    if(p.position.y < -halfHeight) {p.position.y = -halfHeight; p.velocity.y *= -0.5;}
+    if(p.position.y > halfHeight)  {p.position.y = halfHeight;  p.velocity.y *= -0.5;}
+
 
     //バッファに書き戻し
     _ParticleBuffer[id.x] = p;

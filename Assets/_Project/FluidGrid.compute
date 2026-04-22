@@ -1,0 +1,120 @@
+#pragma kernel Advect
+#pragma kernel AddForce
+#pragma kernel Divergence
+#pragma kernel Jacobi
+#pragma kernel Project
+
+uint _Resolution;
+float _DeltaTime;
+
+//外力(マウス)用
+float2 _ForcePos;
+float2 _ForceDir;
+float _ForceRadius;
+
+//サンプラー(滑らかな画像の読み取り)
+SamplerState sampler_LinearClamp;
+
+//テクスチャ群(C#とやり取りするデータ)
+Texture2D<float2> _VelocityRead;
+RWTexture2D<float2> _VelocityWrite;
+
+Texture2D<float> _PressureRead;
+RWTexture2D<float> _PressureWrite;
+
+Texture2D<float> _DivergenceRead;
+RWTexture2D<float> _DivergenceWrite;
+
+//Step1: 移流(Advection) - 風自体が風に乗って移動する
+[numthreads(8,8,1)]
+void Advect(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= _Resolution || id.y >= _Resolution) return;
+
+    //現在の座標をUV変換
+    float2 uv = (id.xy + 0.5) / (float)_Resolution;
+    float2 vel = _VelocityRead[id.xy];
+
+    //元居た場所を逆算して取ってくる
+    float2 prevUV = uv- vel * _DeltaTime;
+
+    //過去の場所の風向きをサンプリングして現在地に持ってくる(余韻)
+    _VelocityWrite[id.xy] = _VelocityRead.SampleLevel(sampler_LinearClamp, prevUV, 0);
+}
+
+//Step2: 外力(AddForce) - マウスの力を加える
+[numthreads(8,8,1)]
+void AddForce(uint3 id: SV_DispatchThreadID){
+    if(id.x >= _Resolution || id.y >= _Resolution) return;
+
+    float2 uv = (id.xy + 0.5) / (float)_Resolution;
+    float2 vel = _VelocityRead[id.xy];
+
+    //マウスからの距離に基づく影響力
+    float dist = distance(uv, _ForcePos);
+
+    if(dist < _ForceRadius)
+    {
+        float influence = exp(-dist * dist / (_ForceRadius*_ForceRadius * 0.5));    
+        vel += _ForceDir * influence * _DeltaTime;
+    }
+
+    _VelocityWrite[id.xy] = vel;
+}
+
+//Step3: 発散(Divergence) - どこで密集が起きているかを計測
+[numthreads(8,8,1)]
+void Divergence(uint3 id: SV_DispatchThreadID)
+{
+    if(id.x >= _Resolution || id.y >= _Resolution) return;
+
+    //上下左右の隣のセルの風向きを調べる
+    float uR = _VelocityRead[min(id.xy + uint2(1, 0), _Resolution - 1)].x;
+    float uL = _VelocityRead[max(id.xy - uint2(1, 0), 0)].x;
+    float vT = _VelocityRead[min(id.xy + uint2(0, 1), _Resolution - 1)].y;
+    float vB = _VelocityRead[max(id.xy - uint2(0, 1), 0)].y;
+
+    //吸い込みと吐き出しの差分(発散量)を計算
+    float div = 0.5 * (uR - uL + vT - vB);
+    _DivergenceWrite[id.xy] = div;
+}
+
+//Step4: 圧力計算(Jacobi/Pressure) - 渋滞を解消するための圧力を計算(ヤコビ)
+[numthreads(8,8,1)]
+void Jacobi(uint3 id: SV_DispatchThreadID)
+{
+    if(id.x >= _Resolution || id.y >= _Resolution) return;
+
+    //上下左右の圧力を調べる
+    float pR = _PressureRead[min(id.xy + uint2(1, 0), _Resolution - 1)];
+    float pL = _PressureRead[max(id.xy - uint2(1, 0), 0)];
+    float pT = _PressureRead[min(id.xy + uint2(0, 1), _Resolution - 1)];
+    float pB = _PressureRead[max(id.xy - uint2(0, 1), 0)];
+
+    float div = _DivergenceRead[id.xy];
+
+    //圧力を平均化して渋滞を打ち消す(C#側でループして精度を上げる)
+    float p = (pR + pL + pT + pB - div) * 0.25;
+    _PressureWrite[id.xy] = p;
+}
+
+//Step5: 投影(Projection) - 圧力に従って風を迂回させる
+[numthreads(8,8,1)]
+void Project(uint3 id: SV_DispatchThreadID)
+{
+    if(id.x >= _Resolution || id.y >= _Resolution) return;
+    
+    //上下左右の圧力を調べる
+    float pR = _PressureRead[min(id.xy + uint2(1, 0), _Resolution - 1)];
+    float pL = _PressureRead[max(id.xy - uint2(1, 0), 0)];
+    float pT = _PressureRead[min(id.xy + uint2(0, 1), _Resolution - 1)];
+    float pB = _PressureRead[max(id.xy - uint2(0, 1), 0)];
+
+    float2 vel = _VelocityRead[id.xy];
+
+    //圧力の高いところから低い所へ、風のベクトルを引き算する
+    vel.x -= 0.5 * (pR - pL);
+    vel.y -= 0.5 * (pT - pB);
+    
+    _VelocityWrite[id.xy] = vel;
+}
