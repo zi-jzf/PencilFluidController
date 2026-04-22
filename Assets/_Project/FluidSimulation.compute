@@ -15,7 +15,8 @@ RWStructuredBuffer<ParticleData> _ParticleBuffer;
 
 //画像読み込み用
 Texture2D<float4> _MainTex;
-uint2 _Resolution;
+uint _ResolutionX;
+uint _ResolutionY;
 float _CanvasSize;
 
 // パラメータ
@@ -37,11 +38,11 @@ void InitParticles (uint3 id : SV_DispatchThreadID)
     ParticleData p = _ParticleBuffer[id.x];
 
     //1次元のインデックスから画像のXYピクセル座標を逆算
-    uint px = id.x % _Resolution.x;
-    uint py = id.x / _Resolution.x;
+    uint px = id.x % _ResolutionX;
+    uint py = id.x / _ResolutionX;
 
     //UV座標の計算
-    float2 uv = float2((float)px / _Resolution.x, (float)py / _Resolution.y);
+    float2 uv = float2((float)px / _ResolutionX, (float)py / _ResolutionY);
     
     //テクスチャからピクセルの色を直接取得
     p.color = _MainTex[uint2(px,py)];
@@ -49,7 +50,7 @@ void InitParticles (uint3 id : SV_DispatchThreadID)
     p.velocity = float3(0.0f,0.0f,0.0f);
 
     //アスペクト比を考慮したワールド座標への配置(中心が原点)
-    float aspect = (float)_Resolution.x / _Resolution.y;
+    float aspect = (float)_ResolutionX / _ResolutionY;
     p.position = float3((uv.x - 0.5) * aspect, uv.y - 0.5, 0) * _CanvasSize;
 
     _ParticleBuffer[id.x] = p;

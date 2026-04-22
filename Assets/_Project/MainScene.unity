@@ -152,8 +152,8 @@ MonoBehaviour:
   fluidComputeShader: {fileID: 7200000, guid: 9dd79e4323cf4534dac3901e8fd078b0, type: 3}
   sourceImage: {fileID: 2800000, guid: e222270d72e28614494c7c55d0236417, type: 3}
   canvasSize: 10
-  interactionRadius: 2
-  interactionForce: 50
+  interactionRadius: 0.5
+  interactionForce: 20
 --- !u!4 &19298890
 Transform:
   m_ObjectHideFlags: 0
@@ -531,7 +531,7 @@ Transform:
   m_GameObject: {fileID: 2097552189}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1, z: -10}
+  m_LocalPosition: {x: 0, y: 0, z: -10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

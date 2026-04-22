@@ -16,6 +16,7 @@ Shader "CustomRenderTexture/ParticleRender"
             
             Cull Off
             ZWrite Off
+            ZTest Always
             // 色の加算（光る表現）にしたい場合は以下を有効化
             // Blend SrcAlpha One
 
@@ -65,8 +66,11 @@ Shader "CustomRenderTexture/ParticleRender"
                 float3 camUp    = UNITY_MATRIX_V[1].xyz;
                 float3 worldPos = p.position + camRight * localPos.x + camUp * localPos.y;
 
+                //HDRPのCRRに対応するためカメラ相対座標に変換
+                float3 cameraRelativePos = GetCameraRelativePositionWS(worldPos);
+
                 // ワールド座標からクリップ空間座標へ変換（HDRP用関数）
-                output.positionCS = TransformWorldToHClip(worldPos);
+                output.positionCS = TransformWorldToHClip(cameraRelativePos);
                 output.color = p.color;
 
                 return output;

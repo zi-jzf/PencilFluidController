@@ -62,7 +62,10 @@ public class FluidSimulationManager : MonoBehaviour
         updateKernel = fluidComputeShader.FindKernel("UpdateParticles");
 
         fluidComputeShader.SetInt("_ParticleCount", particleCount);
-        fluidComputeShader.SetInts("_Resolution", sourceImage.width, sourceImage.height);
+
+        fluidComputeShader.SetInt("_ResolutionX", sourceImage.width);
+        fluidComputeShader.SetInt("_ResolutionY", sourceImage.height);
+
         fluidComputeShader.SetFloat("_CanvasSize", canvasSize);
         fluidComputeShader.SetTexture(initKernel, "_MainTex", sourceImage);
         fluidComputeShader.SetBuffer(initKernel, "_ParticleBuffer", ParticleBuffer);
