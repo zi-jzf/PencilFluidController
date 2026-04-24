@@ -130,6 +130,7 @@ GameObject:
   - component: {fileID: 19298890}
   - component: {fileID: 19298891}
   - component: {fileID: 19298889}
+  - component: {fileID: 19298892}
   m_Layer: 0
   m_Name: FluidRenderer
   m_TagString: Untagged
@@ -154,6 +155,7 @@ MonoBehaviour:
   canvasSize: 10
   interactionRadius: 0.5
   interactionForce: 20
+  gridSolver: {fileID: 19298892}
 --- !u!4 &19298890
 Transform:
   m_ObjectHideFlags: 0
@@ -204,6 +206,29 @@ MonoBehaviour:
         m_Version: 0
         fluidManager: {fileID: 19298889}
         particleMaterial: {fileID: 2100000, guid: d633806fb3906644d9ca712b2ebc5f3a, type: 2}
+--- !u!114 &19298892
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 19298888}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e4b9ee179bb9a7b439d758a147f313f5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FluidGridSolver
+  fluidGridCompute: {fileID: 7200000, guid: c4166386941d89643b90f88849ecd4f9, type: 3}
+  resolution: 256
+  fluidViscosity: 0.01
+  solverIterations: 40
+  forceRadius: 0.05
+  forceMultiplier: 250
+  velocityTx_A: {fileID: 0}
+  velocityTx_B: {fileID: 0}
+  pressureTx_A: {fileID: 0}
+  pressureTx_B: {fileID: 0}
+  divergenceTx: {fileID: 0}
 --- !u!1 &61946970
 GameObject:
   m_ObjectHideFlags: 0

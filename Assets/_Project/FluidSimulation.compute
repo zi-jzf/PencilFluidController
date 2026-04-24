@@ -13,6 +13,10 @@ struct ParticleData
 // バッファ
 RWStructuredBuffer<ParticleData> _ParticleBuffer;
 
+//流体計算したマップを読み込み
+Texture2D<float2> _VelocityField;
+SamplerState sampler_LinearClamp;
+
 //画像読み込み用
 Texture2D<float4> _MainTex;
 uint _ResolutionX;
@@ -63,53 +67,34 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
 
     ParticleData p = _ParticleBuffer[id.x];
 
-    //マウス入力による外力の計算(押し出し＋渦)
-    float dist = distance(p.position, _MousePosition);
-    if(dist < _InteractionRadius)
+    //1. グリッドから速度を読み取る
+    float aspect = (float)_ResolutionX / (float)_ResolutionY;
+
+    //パーティクルのワールド座標から0~1のUV空間に逆変換する
+    float2 gridUV;
+    gridUV.x = (p.position.x / _CanvasSize) / aspect + 0.5;
+    gridUV.y = (p.position.y / _CanvasSize) + 0.5;
+
+    //UVの範囲内(キャンバス上)にいる場合のみ、風の影響を受ける
+    if(gridUV.x >= 0.0 && gridUV.x <= 1.0 && gridUV.y >= 0.0 && gridUV.y <= 1.0)
     {
-        //距離に応じた影響度合い(smoothstepを使用して滑らかに)
-        float influence = smoothstep(_InteractionRadius, 0.0, dist);
-
-        //押し出す力
-        float3 pushForce = _MouseVelocity * influence * _InteractionForce;
-
-        //渦を巻く力(Z軸との外積を取り、マウス進行方向の横向きのベクトルを作る)
-        float3 swirlDirection = cross(float3(0,0,1), normalize(_MouseVelocity + float3(0.001,0,0)));
-        
-        //渦の強さはマウス速度の長さに比例させる
-        float swirlForce = swirlDirection * length(_MouseVelocity) * influence * _InteractionForce * 0.8;
-
-        //合算して適用
-        p.velocity += (pushForce + swirlForce) * _DeltaTime;
+        //流体グリッドマップから風のベクトルをサンプリング
+        float2 fluidVelocity = _VelocityField.SampleLevel(sampler_LinearClamp, gridUV, 0);
+    
+        //Z方向の力は0にして風の力をパーティクルに加算
+        //係数5.0は風の影響力の強さ
+        p.velocity += float3(fluidVelocity.x, fluidVelocity.y, 0) * 5.0 * _DeltaTime;
     }
 
-    //元の位置へゆっくり戻る力
-    //初期UVから本来あるべきワールド座標を再計算
-    float aspect = (float)_ResolutionX / _ResolutionY;
+    //2. 元の位置への復元力
     float3 originalPos = float3((p.initialUV.x - 0.5) * aspect, p.initialUV.y - 0.5, 0) * _CanvasSize;
-
-    //元の位置に向かって引っ張る力
     float3 returnForce = (originalPos - p.position) * 1.5;
     p.velocity += returnForce * _DeltaTime;
 
-    //減衰
-    p.velocity *= 0.95f;
+    //3. 減衰と移流
+    p.velocity *= 0.95; //減衰(粘性)
+    p.position += p.velocity * _DeltaTime; //移流
 
-    //移流
-    p.position += p.velocity * _DeltaTime;
-
-
-    //キャンバス境界の壁
-    float halfHeight = _CanvasSize * 0.5;
-    float halfWidth = halfHeight * aspect;
-
-    //画面外に出たら位置をクランプして、速度を反転させて跳ね返す
-    if(p.position.x < -halfWidth)  {p.position.x = -halfWidth;  p.velocity.x *= -0.5;}
-    if(p.position.x > halfWidth)   {p.position.x = halfWidth;   p.velocity.x *= -0.5;}
-    if(p.position.y < -halfHeight) {p.position.y = -halfHeight; p.velocity.y *= -0.5;}
-    if(p.position.y > halfHeight)  {p.position.y = halfHeight;  p.velocity.y *= -0.5;}
-
-
-    //バッファに書き戻し
     _ParticleBuffer[id.x] = p;
+
 }

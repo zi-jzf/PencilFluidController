@@ -13,6 +13,9 @@ public class FluidSimulationManager : MonoBehaviour
     public float interactionRadius = 2.0f;
     public float interactionForce = 50.0f;
 
+    [Header("Fluid Solver Reference")]
+    public FluidGridSolver gridSolver; //流体ソルバーへの参照
+
     //外部から参照するためのプロパティ
     public ComputeBuffer ParticleBuffer { get; private set; }
     public ComputeBuffer ArgsBuffer { get; private set; } //描画命令用バッファ
@@ -86,31 +89,16 @@ public class FluidSimulationManager : MonoBehaviour
 
     private void DispatchSimulation()
     {
-        //新しいInputSystemによるマウス制御
-        if(Mouse.current == null || Camera.main == null) return;
-
-        //簡易的なマウス座標取得(Z=0の平面)
-        Vector3 mousePos2D = Mouse.current.position.ReadValue();
-        Vector3 mouseScreenPos = new Vector3(mousePos2D.x, mousePos2D.y, Mathf.Abs(Camera.main.transform.position.z));
-        Vector3 currentMousePos = Camera.main.ScreenToWorldPoint(mouseScreenPos);
-
-        //マウスの移動量(速度)
-        Vector3 mouseVelocity = Vector3.zero;
-        if(Mouse.current.leftButton.isPressed){
-            mouseVelocity = (currentMousePos - lastMousePos) / Time.deltaTime;
-        }
+        //FluidGridSolverがアタッチされていない、またはテクスチャの準備ができていない場合はスキップ
+        if (gridSolver == null || gridSolver.velocityTx_A == null) return;
 
         fluidComputeShader.SetFloat("_DeltaTime", Time.deltaTime);
-        fluidComputeShader.SetVector("_MousePosition", currentMousePos);
-        fluidComputeShader.SetVector("_MouseVelocity", mouseVelocity);
-        fluidComputeShader.SetFloat("_InteractionRadius", interactionRadius);
-        fluidComputeShader.SetFloat("_InteractionForce", interactionForce);
+    
+        // 気象庁（GridSolver）が計算した最新の「風のテクスチャ」を渡す
+        fluidComputeShader.SetTexture(updateKernel, "_VelocityField", gridSolver.velocityTx_A);
 
-        //シミュレーションカーネルの実行
         int threadGroups = Mathf.CeilToInt(particleCount / (float)ThreadGroupSize);
         fluidComputeShader.Dispatch(updateKernel, threadGroups, 1, 1);
-
-        lastMousePos = currentMousePos;
     }
 
     void OnDestroy()
