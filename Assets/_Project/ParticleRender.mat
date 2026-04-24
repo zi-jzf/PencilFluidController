@@ -25,7 +25,7 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _ParticleSize: 0.05
+    - _ParticleSize: 0.03
     m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1

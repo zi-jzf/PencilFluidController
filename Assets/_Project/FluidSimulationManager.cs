@@ -96,6 +96,11 @@ public class FluidSimulationManager : MonoBehaviour
     
         // 気象庁（GridSolver）が計算した最新の「風のテクスチャ」を渡す
         fluidComputeShader.SetTexture(updateKernel, "_VelocityField", gridSolver.velocityTx_A);
+        
+        // 障害物テクスチャがあれば渡す
+        if(gridSolver.obstacleMask != null){
+            fluidComputeShader.SetTexture(updateKernel, "_ObstacleMask", gridSolver.obstacleMask);
+        }
 
         int threadGroups = Mathf.CeilToInt(particleCount / (float)ThreadGroupSize);
         fluidComputeShader.Dispatch(updateKernel, threadGroups, 1, 1);

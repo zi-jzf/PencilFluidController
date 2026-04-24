@@ -224,6 +224,7 @@ MonoBehaviour:
   solverIterations: 40
   forceRadius: 0.05
   forceMultiplier: 250
+  obstacleMask: {fileID: 2800000, guid: 075a2dbc793feb64f8cd30a6d876cd3a, type: 3}
   velocityTx_A: {fileID: 0}
   velocityTx_B: {fileID: 0}
   pressureTx_A: {fileID: 0}
@@ -671,7 +672,7 @@ MonoBehaviour:
       enableBigTilePrepass: 0
       isFptlEnabled: 0
   clearColorMode: 1
-  backgroundColorHDR: {r: 0, g: 0, b: 0, a: 0}
+  backgroundColorHDR: {r: 0.08851014, g: 0.10221007, b: 0.122641504, a: 0}
   clearDepth: 1
   volumeLayerMask:
     serializedVersion: 2

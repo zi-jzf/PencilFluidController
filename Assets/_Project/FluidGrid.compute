@@ -25,6 +25,8 @@ RWTexture2D<float> _PressureWrite;
 Texture2D<float> _DivergenceRead;
 RWTexture2D<float> _DivergenceWrite;
 
+Texture2D<float4> _ObstacleMask;
+
 //Step1: 移流(Advection) - 風自体が風に乗って移動する
 [numthreads(8,8,1)]
 void Advect(uint3 id : SV_DispatchThreadID)
@@ -45,6 +47,16 @@ void Advect(uint3 id : SV_DispatchThreadID)
     //速度が大きくなりすぎないように制限(爆発防止)
     vel = clamp(vel, -10.0, 10.0);
 
+    //障害物判定
+    //マスクのRチャンネルをサンプリング
+    float maskValue = _ObstacleMask.SampleLevel(sampler_LinearClamp, uv, 0).r;
+    //白(0.5以上なら障害物とみなし風速を0にして終了)
+    if(maskValue > 0.5)
+    {
+        _VelocityWrite[id.xy] = float2(0, 0);
+        return;
+    }
+
     //元居た場所を逆算して取ってくる
     float2 prevUV = uv- vel * _DeltaTime;
 
@@ -57,8 +69,23 @@ void Advect(uint3 id : SV_DispatchThreadID)
 void AddForce(uint3 id: SV_DispatchThreadID){
     if(id.x >= _Resolution || id.y >= _Resolution) return;
 
+    //境界(端の1ピクセル)は速度を0にする
+    if(id.x <= 1 || id.x >= _Resolution - 2 || id.y <= 1 || id.y >= _Resolution - 2) 
+    {
+        _VelocityWrite[id.xy] = float2(0, 0);
+        return;
+    }
+
     float2 uv = (id.xy + 0.5) / (float)_Resolution;
     float2 vel = _VelocityRead[id.xy];
+
+    //障害物判定
+    float maskValue = _ObstacleMask.SampleLevel(sampler_LinearClamp, uv, 0).r;
+    if(maskValue > 0.5)
+    {
+        _VelocityWrite[id.xy] = float2(0, 0);
+        return;
+    }
 
     //マウスからの距離に基づく影響力
     float dist = distance(uv, _ForcePos);
@@ -78,11 +105,24 @@ void Divergence(uint3 id: SV_DispatchThreadID)
 {
     if(id.x >= _Resolution || id.y >= _Resolution) return;
 
-    //上下左右の隣のセルの風向きを調べる
-    float uR = _VelocityRead[min(id.xy + uint2(1, 0), _Resolution - 1)].x;
-    float uL = _VelocityRead[max(id.xy - uint2(1, 0), 0)].x;
-    float vT = _VelocityRead[min(id.xy + uint2(0, 1), _Resolution - 1)].y;
-    float vB = _VelocityRead[max(id.xy - uint2(0, 1), 0)].y;
+    //自身のUVとマスク値(Rチャンネル)
+    float2 uv = (id.xy + 0.5) / (float)_Resolution;
+    if(_ObstacleMask.SampleLevel(sampler_LinearClamp, uv, 0).r > 0.5){
+        _DivergenceWrite[id.xy] = 0;
+        return;
+    }
+
+    // 上下左右のUV
+    float2 uvR = (id.xy + uint2(1, 0) + 0.5) / (float)_Resolution;
+    float2 uvL = (id.xy - uint2(1, 0) + 0.5) / (float)_Resolution;
+    float2 uvT = (id.xy + uint2(0, 1) + 0.5) / (float)_Resolution;
+    float2 uvB = (id.xy - uint2(0, 1) + 0.5) / (float)_Resolution;
+
+    // 隣が障害物なら風速0として扱う（壁への吸い込みを防ぐ）
+    float uR = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvR, 0).r > 0.5 ? 0.0 : _VelocityRead[min(id.xy + uint2(1, 0), _Resolution - 1)].x;
+    float uL = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvL, 0).r > 0.5 ? 0.0 : _VelocityRead[max(id.xy - uint2(1, 0), 0)].x;
+    float vT = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvT, 0).r > 0.5 ? 0.0 : _VelocityRead[min(id.xy + uint2(0, 1), _Resolution - 1)].y;
+    float vB = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvB, 0).r > 0.5 ? 0.0 : _VelocityRead[max(id.xy - uint2(0, 1), 0)].y;
 
     //吸い込みと吐き出しの差分(発散量)を計算
     float div = 0.5 * (uR - uL + vT - vB);
@@ -95,11 +135,25 @@ void Jacobi(uint3 id: SV_DispatchThreadID)
 {
     if(id.x >= _Resolution || id.y >= _Resolution) return;
 
-    //上下左右の圧力を調べる
-    float pR = _PressureRead[min(id.xy + uint2(1, 0), _Resolution - 1)];
-    float pL = _PressureRead[max(id.xy - uint2(1, 0), 0)];
-    float pT = _PressureRead[min(id.xy + uint2(0, 1), _Resolution - 1)];
-    float pB = _PressureRead[max(id.xy - uint2(0, 1), 0)];
+    float2 uv = (id.xy + 0.5) / (float)_Resolution;
+    if (_ObstacleMask.SampleLevel(sampler_LinearClamp, uv, 0).r > 0.5) {
+        _PressureWrite[id.xy] = 0;
+        return;
+    }
+
+    float2 uvR = (id.xy + uint2(1, 0) + 0.5) / (float)_Resolution;
+    float2 uvL = (id.xy - uint2(1, 0) + 0.5) / (float)_Resolution;
+    float2 uvT = (id.xy + uint2(0, 1) + 0.5) / (float)_Resolution;
+    float2 uvB = (id.xy - uint2(0, 1) + 0.5) / (float)_Resolution;
+
+    // 自身の圧力（反射用）
+    float pC = _PressureRead[id.xy];
+
+    // 隣が障害物なら「自分自身の圧力」を採用する（ノイマン境界条件による反射）
+    float pR = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvR, 0).r > 0.5 ? pC : _PressureRead[min(id.xy + uint2(1, 0), _Resolution - 1)];
+    float pL = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvL, 0).r > 0.5 ? pC : _PressureRead[max(id.xy - uint2(1, 0), 0)];
+    float pT = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvT, 0).r > 0.5 ? pC : _PressureRead[min(id.xy + uint2(0, 1), _Resolution - 1)];
+    float pB = _ObstacleMask.SampleLevel(sampler_LinearClamp, uvB, 0).r > 0.5 ? pC : _PressureRead[max(id.xy - uint2(0, 1), 0)];
 
     float div = _DivergenceRead[id.xy];
 
@@ -113,6 +167,22 @@ void Jacobi(uint3 id: SV_DispatchThreadID)
 void Project(uint3 id: SV_DispatchThreadID)
 {
     if(id.x >= _Resolution || id.y >= _Resolution) return;
+
+    //境界(端の1ピクセル)は速度を0にする
+    if(id.x <= 1 || id.x >= _Resolution - 2 || id.y <= 1 || id.y >= _Resolution - 2) 
+    {
+        _VelocityWrite[id.xy] = float2(0, 0);
+        return;
+    }
+
+    float2 uv = (id.xy + 0.5) / (float)_Resolution;
+    //障害物判定
+    float maskValue = _ObstacleMask.SampleLevel(sampler_LinearClamp, uv, 0).r;
+    if(maskValue > 0.5)
+    {
+        _VelocityWrite[id.xy] = float2(0, 0);
+        return;
+    }
     
     //上下左右の圧力を調べる
     float pR = _PressureRead[min(id.xy + uint2(1, 0), _Resolution - 1)];

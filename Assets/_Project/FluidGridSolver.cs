@@ -13,6 +13,9 @@ public class FluidGridSolver : MonoBehaviour
     public float forceRadius = 0.05f;
     public float forceMultiplier = 500.0f;
 
+    [Header("Obstacle(MonoMaskImage)")]
+    public Texture2D obstacleMask; //白黒のマスク画像
+
     //流体計算に必要なテクスチャ群(ピンポンバッファ等)
     public RenderTexture velocityTx_A;
     public RenderTexture velocityTx_B;
@@ -59,6 +62,19 @@ public class FluidGridSolver : MonoBehaviour
         divergenceKernel = fluidGridCompute.FindKernel("Divergence");
         jacobiKernel = fluidGridCompute.FindKernel("Jacobi");
         projectKernel = fluidGridCompute.FindKernel("Project");
+
+        if(obstacleMask != null)
+        {
+            fluidGridCompute.SetTexture(advectKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(forceKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(divergenceKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(jacobiKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(projectKernel, "_ObstacleMask", obstacleMask);
+        }
+        else
+        {
+            Debug.LogWarning("obstacleMaskがセットされていません");
+        }
     }
 
     void Update()

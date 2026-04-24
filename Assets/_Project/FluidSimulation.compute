@@ -17,6 +17,9 @@ RWStructuredBuffer<ParticleData> _ParticleBuffer;
 Texture2D<float2> _VelocityField;
 SamplerState sampler_LinearClamp;
 
+//障害物マップを読み込み
+Texture2D<float4> _ObstacleMask;
+
 //画像読み込み用
 Texture2D<float4> _MainTex;
 uint _ResolutionX;
@@ -67,6 +70,9 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
 
     ParticleData p = _ParticleBuffer[id.x];
 
+    //古い位置を記憶
+    float3 oldPosition = p.position;
+
     //NaN対策
     //もし位置や速度が壊れていたら初期位置に強制リセットする
     if(any(isnan(p.position)) || any(isinf(p.position)))
@@ -99,8 +105,24 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
     p.velocity += returnForce * _DeltaTime;
 
     //3. 減衰と移流
-    p.velocity *= 0.955; //減衰(粘性)
+    p.velocity *= 0.97; //減衰(粘性)
     p.position += p.velocity * _DeltaTime; //移流
+
+    //障害物との物理衝突判定
+    float2 newGridUV = float2((p.position.x / _CanvasSize) / aspect + 0.5, (p.position.y / _CanvasSize) + 0.5);
+    
+    //画面内かつマスクの白い部分(障害物)に入ってしまったか
+    if(newGridUV.x >= 0.0 && newGridUV.x <= 1.0 && newGridUV.y >= 0.0 && newGridUV.y <= 1.0)
+    {
+        float maskValue = _ObstacleMask.SampleLevel(sampler_LinearClamp, newGridUV, 0).r;
+        if(maskValue > 0.5)
+        {
+            //障害物にめり込んだので移動をキャンセル(古い位置に戻す)
+            p.position = oldPosition;
+            //速度を反転・減衰させてはじき返す
+            p.velocity *= -0.5;
+        }
+    }
 
     //強制境界(画像の範囲外に出さない)
     float halfH = _CanvasSize * 0.5;
