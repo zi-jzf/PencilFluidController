@@ -31,9 +31,19 @@ void Advect(uint3 id : SV_DispatchThreadID)
 {
     if(id.x >= _Resolution || id.y >= _Resolution) return;
 
+    //境界(端の1ピクセル)は速度を0にする
+    if(id.x <= 1 || id.x >= _Resolution - 2 || id.y <= 1 || id.y >= _Resolution - 2) 
+    {
+        _VelocityWrite[id.xy] = float2(0, 0);
+        return;
+    }
+
     //現在の座標をUV変換
     float2 uv = (id.xy + 0.5) / (float)_Resolution;
     float2 vel = _VelocityRead[id.xy];
+
+    //速度が大きくなりすぎないように制限(爆発防止)
+    vel = clamp(vel, -10.0, 10.0);
 
     //元居た場所を逆算して取ってくる
     float2 prevUV = uv- vel * _DeltaTime;

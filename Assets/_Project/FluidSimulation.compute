@@ -67,13 +67,20 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
 
     ParticleData p = _ParticleBuffer[id.x];
 
+    //NaN対策
+    //もし位置や速度が壊れていたら初期位置に強制リセットする
+    if(any(isnan(p.position)) || any(isinf(p.position)))
+    {
+        float aspect = (float)_ResolutionX / (float)_ResolutionY;
+        p.position = float3((p.initialUV.x - 0.5) * aspect, p.initialUV.y - 0.5, 0) * _CanvasSize;
+        p.velocity = float3(0, 0, 0);
+    }
+
     //1. グリッドから速度を読み取る
     float aspect = (float)_ResolutionX / (float)_ResolutionY;
 
     //パーティクルのワールド座標から0~1のUV空間に逆変換する
-    float2 gridUV;
-    gridUV.x = (p.position.x / _CanvasSize) / aspect + 0.5;
-    gridUV.y = (p.position.y / _CanvasSize) + 0.5;
+    float2 gridUV = float2((p.position.x / _CanvasSize) / aspect + 0.5, (p.position.y / _CanvasSize) + 0.5);
 
     //UVの範囲内(キャンバス上)にいる場合のみ、風の影響を受ける
     if(gridUV.x >= 0.0 && gridUV.x <= 1.0 && gridUV.y >= 0.0 && gridUV.y <= 1.0)
@@ -83,17 +90,23 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
     
         //Z方向の力は0にして風の力をパーティクルに加算
         //係数5.0は風の影響力の強さ
-        p.velocity += float3(fluidVelocity.x, fluidVelocity.y, 0) * 5.0 * _DeltaTime;
+        p.velocity += float3(clamp(fluidVelocity, -5.0, 5.0), 0) * 5.0 * _DeltaTime;
     }
 
     //2. 元の位置への復元力
     float3 originalPos = float3((p.initialUV.x - 0.5) * aspect, p.initialUV.y - 0.5, 0) * _CanvasSize;
-    float3 returnForce = (originalPos - p.position) * 1.5;
+    float3 returnForce = (originalPos - p.position) * 0.7;
     p.velocity += returnForce * _DeltaTime;
 
     //3. 減衰と移流
-    p.velocity *= 0.95; //減衰(粘性)
+    p.velocity *= 0.955; //減衰(粘性)
     p.position += p.velocity * _DeltaTime; //移流
+
+    //強制境界(画像の範囲外に出さない)
+    float halfH = _CanvasSize * 0.5;
+    float halfW = halfH * aspect;
+    p.position.x = clamp(p.position.x, -halfW, halfW);
+    p.position.y = clamp(p.position.y, -halfH, halfH);
 
     _ParticleBuffer[id.x] = p;
 
