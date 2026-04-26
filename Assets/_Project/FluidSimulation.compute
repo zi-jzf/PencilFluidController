@@ -100,68 +100,69 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
     {
         //流体グリッドマップから風のベクトルをサンプリング
         fluidVelocity = _VelocityField.SampleLevel(sampler_LinearClamp, gridUV, 0);
-    
-        //Z方向の力は0にして風の力をパーティクルに加算
-        //係数5.0は風の影響力の強さ
-        p.velocity += float3(clamp(fluidVelocity, -5.0, 5.0), 0) * 5.0 * _DeltaTime;
     }
-
-    //3. 元の位置への復元力(減衰による戻る力の相殺を防止)
-    float3 diff = originalPos - p.position;
-    float dist = length(diff);
-
+    
     float fluidSpeed = length(fluidVelocity);
     float particleSpeed = length(p.velocity);
 
-    //①風が止んでおり、かつパーティクルの勢いも落ちているか
-    bool isCalm = (fluidSpeed < 0.2) && (particleSpeed < 1.0);
+    //状態の連続的なブレンド(0.0: 平和, 1.0: 風が強い)
+    float activity = smoothstep(0.01, 0.5, fluidSpeed + particleSpeed * 0.1);
 
-    if(isCalm)
-    {
-        if(dist > 0.01)
-        {
-            //平和なら元の位置に向かって戻る
-            float pullForce = min(dist * 2.0, 3.0) + 0.5; //+0.5をして確実に引き戻す
-            p.velocity += (diff / dist) * pullForce * _DeltaTime;
-        }
-        else
-        {
-            //十分に近づいたらピタッと吸着させ、物理計算をスキップして終了する（完全静止）
-            p.position = originalPos;
-            p.velocity = float3(0, 0, 0);
-            
-            // 移流や減衰をさせないために、ここでreturnして処理を終わらせるのが一番安全！
-            _ParticleBuffer[id.x] = p;
-            return;
-        }
-    }
+    //3. 元の位置への復元力の計算
+    float3 diff = originalPos - p.position;
+    float dist = max(length(diff), 1e-5); //ゼロ除算防止
+    float3 homeDir = diff / dist;
+    
+    //距離に比例したバネの力(上限値を設けて暴走を防ぐ)
+    float pullForce = clamp(dist * 2.0, 0.0, 4.0);
 
-    //4. 減衰と移流・障害物判定
-    //古い位置を記憶
+    //活性度が低い(平和な)時ほど復元力が強く働く
+    float3 homeForce = homeDir * pullForce * (1.0 - activity);
+
+    //流体の力と復元力を合成して加算(地割れ防止)
+    float3 fluidForce = float3(clamp(fluidVelocity, -5.0, 5.0), 0) * 5.0;
+    p.velocity += (fluidForce + homeForce) * _DeltaTime;
+
+    //4. 移流と可変摩擦
     float3 oldPosition = p.position;
 
-    p.velocity *= 0.97; //減衰(粘性)
+    //平和な時ほど摩擦を強く(0.85)してピタッと止まらせ、動いている時滑らせる(0.98)
+    float drag = lerp(0.85, 0.98, activity);
+    p.velocity *= drag;
+
     p.position += p.velocity * _DeltaTime; //移流
 
-    //障害物との物理衝突判定
-    //平和な時(isCalm)は障害物をすり抜けて元の位置に戻らせるため、衝突判定をスキップする
-    if(!isCalm){
+    // 5. 障害物判定とスライディング処理 (吹き溜まりの防止)
+    // 活発に動いている時のみ衝突判定を行うことで、元の位置へ戻る際の「吹き溜まり」を防ぐ
+    if(activity > 0.1)
+    {
         float2 newGridUV = float2((p.position.x / _CanvasSize) / aspect + 0.5, (p.position.y / _CanvasSize) + 0.5);
-    
-        //画面内かつマスクの白い部分(障害物)に入ってしまったか
+        
         if(newGridUV.x >= 0.0 && newGridUV.x <= 1.0 && newGridUV.y >= 0.0 && newGridUV.y <= 1.0)
         {
             float maskValue = _ObstacleMask.SampleLevel(sampler_LinearClamp, newGridUV, 0).r;
             if(maskValue > 0.5)
             {
-                //障害物にめり込んだので移動をキャンセル(古い位置に戻す)
-            p.position = oldPosition;
-            //速度を反転・減衰させてはじき返す
-            p.velocity *= -0.5;
+                // 障害物にめり込んだので移動をキャンセル(古い位置に戻す)
+                p.position = oldPosition;
+                
+                // 速度を反転・減衰させて弾き返す（軽やかな流体の動き）
+                p.velocity *= -0.5;
             }
         }
     }
-    
+
+    // 6. 微小な振動を防ぐ吸着処理 (ノイズ防止)
+    if(dist < 0.02 && activity < 0.05)
+    {
+        // 距離が極めて近く、かつ平和な場合はLerpで滑らかに初期位置へ吸着させる
+        p.position = lerp(p.position, originalPos, 0.2);
+        if(dist < 0.005) 
+        {
+            p.position = originalPos;
+            p.velocity = float3(0, 0, 0);
+        }
+    }
 
     //強制境界(画像の範囲外に出さない)
     float halfH = _CanvasSize * 0.5;
