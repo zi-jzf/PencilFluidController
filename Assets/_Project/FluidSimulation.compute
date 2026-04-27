@@ -36,6 +36,9 @@ float3 _MouseVelocity;
 float _InteractionRadius;
 float _InteractionForce;
 
+//パーティクルリセット用変数
+float _ResetBlend;
+
 [numthreads(256,1,1)]
 void InitParticles (uint3 id : SV_DispatchThreadID)
 {
@@ -114,7 +117,7 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
     float3 homeDir = diff / dist;
     
     //距離に比例したバネの力(上限値を設けて暴走を防ぐ)
-    float pullForce = clamp(dist * 2.0, 0.0, 4.0);
+    float pullForce = clamp(dist * 2.0 + 0.05, 0.0, 4.0);
 
     //活性度が低い(平和な)時ほど復元力が強く働く
     float3 homeForce = homeDir * pullForce * (1.0 - activity);
@@ -152,17 +155,10 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    // 6. 微小な振動を防ぐ吸着処理 (ノイズ防止)
-    if(dist < 0.02 && activity < 0.05)
-    {
-        // 距離が極めて近く、かつ平和な場合はLerpで滑らかに初期位置へ吸着させる
-        p.position = lerp(p.position, originalPos, 0.2);
-        if(dist < 0.005) 
-        {
-            p.position = originalPos;
-            p.velocity = float3(0, 0, 0);
-        }
-    }
+    //6. 強制リセットボタン
+    //_ResetBlendが0.0なら影響なし。1.0になれば完全に元の位置へ固定。
+    p.position = lerp(p.position, originalPos, _ResetBlend);
+    p.velocity = lerp(p.velocity, float3(0,0,0), _ResetBlend);
 
     //強制境界(画像の範囲外に出さない)
     float halfH = _CanvasSize * 0.5;

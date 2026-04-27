@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Runtime.InteropServices;
 using UnityEngine.InputSystem;
+using System.Collections;
 
 public class FluidSimulationManager : MonoBehaviour
 {
@@ -15,6 +16,11 @@ public class FluidSimulationManager : MonoBehaviour
 
     [Header("Fluid Solver Reference")]
     public FluidGridSolver gridSolver; //流体ソルバーへの参照
+
+    [Header("Reset Settings")]
+    public float resetDuration = 2.0f; //完全リセットに掛ける係数
+    private float currentResetBlend = 0.0f;
+    private Coroutine resetCoroutine;
 
     //外部から参照するためのプロパティ
     public ComputeBuffer ParticleBuffer { get; private set; }
@@ -93,7 +99,8 @@ public class FluidSimulationManager : MonoBehaviour
         if (gridSolver == null || gridSolver.velocityTx_A == null) return;
 
         fluidComputeShader.SetFloat("_DeltaTime", Time.deltaTime);
-    
+        fluidComputeShader.SetFloat("_ResetBlend", currentResetBlend);
+
         // 気象庁（GridSolver）が計算した最新の「風のテクスチャ」を渡す
         fluidComputeShader.SetTexture(updateKernel, "_VelocityField", gridSolver.velocityTx_A);
         
@@ -104,6 +111,41 @@ public class FluidSimulationManager : MonoBehaviour
 
         int threadGroups = Mathf.CeilToInt(particleCount / (float)ThreadGroupSize);
         fluidComputeShader.Dispatch(updateKernel, threadGroups, 1, 1);
+    }
+
+    // インスペクター用の強制リセット・再開ボタン
+    // FluidSimulationManagerスクリプトの名前部分を右クリックして実行
+    [ContextMenu("Trigger Reset (元の絵に戻す)")]
+    public void TriggerReset()
+    {
+        if (resetCoroutine != null) StopCoroutine(resetCoroutine);
+        resetCoroutine = StartCoroutine(SmoothReset(true));
+    }
+
+    [ContextMenu("Release Fluid (再び流体化させる)")]
+    public void ReleaseFluid()
+    {
+        if (resetCoroutine != null) StopCoroutine(resetCoroutine);
+        resetCoroutine = StartCoroutine(SmoothReset(false));
+    }
+
+    // 滑らかにブレンド値を遷移させるコルーチン
+    private IEnumerator SmoothReset(bool isResetting)
+    {
+        float startValue = currentResetBlend;
+        float targetValue = isResetting ? 1.0f : 0.0f;
+        float elapsed = 0f;
+
+        while (elapsed < resetDuration)
+        {
+            elapsed += Time.deltaTime;
+            // SmoothStep関数で、徐々に加速・減速しながら滑らかに値を変化させる
+            float t = elapsed / resetDuration;
+            currentResetBlend = Mathf.SmoothStep(startValue, targetValue, t);
+            yield return null;
+        }
+
+        currentResetBlend = targetValue;
     }
 
     void OnDestroy()
