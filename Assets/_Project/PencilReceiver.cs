@@ -3,6 +3,18 @@ using WebSocketSharp;
 using WebSocketSharp.Server;
 using System.Collections.Concurrent;
 
+//iPadで入力されたデータを保持するクラス
+[System.Serializable]
+public class PencilData
+{
+    public float x;
+    public float y;
+    public float pressure;
+    public float tiltX;
+    public float tiltY;
+    public bool isPressed;
+}
+
 //クライアント(iPad)と接続された際の振る舞いを定義するクラス
 public class ApplePencilBehavior : WebSocketBehavior
 {
@@ -23,6 +35,9 @@ public class PencilReceiver : MonoBehaviour
 
     private WebSocketServer wss;
 
+    //最新の受信データを保持する変数（public staticなので、他のスクリプトからもアクセス可能）
+    public static PencilData CurrentData = new PencilData();
+
     void Start()
     {
         //サーバーの立ち上げ
@@ -42,7 +57,10 @@ public class PencilReceiver : MonoBehaviour
         while (ApplePencilBehavior.messageQueue.TryDequeue(out string jsonString))
         {
             //受信できたか確認するためのデバックログ
-            Debug.Log($"[iPadからの受信データ]: {jsonString}");
+            //Debug.Log($"[iPadからの受信データ]: {jsonString}");
+
+            //JsonUtilityを使って文字列stringからPencildataオブジェクトに変換
+            JsonUtility.FromJsonOverwrite(jsonString, CurrentData);
         }
     }
 

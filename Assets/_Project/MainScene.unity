@@ -224,7 +224,7 @@ MonoBehaviour:
   fluidViscosity: 0.01
   solverIterations: 40
   forceRadius: 0.05
-  forceMultiplier: 250
+  forceMultiplier: 700
   obstacleMask: {fileID: 2800000, guid: 075a2dbc793feb64f8cd30a6d876cd3a, type: 3}
   velocityTx_A: {fileID: 0}
   velocityTx_B: {fileID: 0}

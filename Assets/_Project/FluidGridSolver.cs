@@ -27,6 +27,8 @@ public class FluidGridSolver : MonoBehaviour
     private const int THREAD_SIZE = 8;
     private Vector3 lastMousePos;
 
+    private Vector2 lastPencilUV;
+
     void Start()
     {
         InitializeTextures();
@@ -96,8 +98,9 @@ public class FluidGridSolver : MonoBehaviour
         fluidGridCompute.Dispatch(advectKernel, threadGroupsX, threadGroupsY, 1);
         Swap(ref velocityTx_A, ref velocityTx_B);
 
-        //Step2: 外力(Add Force) - マウス入力を反映
-        ApplyMouseForce(threadGroupsX, threadGroupsY);
+        //Step2: 外力(Add Force) - 入力を反映
+        //ApplyMouseForce(threadGroupsX, threadGroupsY);
+        ApplyPencilForce(threadGroupsX, threadGroupsY);
         
         //Step3: 発散(Divergence) - どこに流体が密集しているか計算
         fluidGridCompute.SetTexture(divergenceKernel, "_VelocityRead", velocityTx_A);
@@ -153,6 +156,39 @@ public class FluidGridSolver : MonoBehaviour
         Swap(ref velocityTx_A, ref velocityTx_B);
 
         lastMousePos = currentMousePos;
+    }
+
+    private void ApplyPencilForce(int threadGroupsX, int threadGroupsY)
+    {
+        PencilData data = PencilReceiver.CurrentData;
+        if (data == null) return;
+
+        //iPadから送られてきた座標(0.0 ~ 1.0)をそのままUVとして使用
+        Vector2 forcePosUV = new Vector2(data.x, data.y);
+        Vector2 pencilVelocity = Vector2.zero;
+
+        if(data.isPressed)
+        {
+            //ペンの移動速度
+            pencilVelocity = (forcePosUV - lastPencilUV) / Time.deltaTime;
+            
+            //筆圧が強いほどかき混ぜる力が強くなる
+            float currentForceMultiplier = forceMultiplier * Mathf.Max(data.pressure, 0.2f);
+
+            //筆圧が強いほど影響を与える半径が広がる
+            float currentRadius = forceRadius * (1.0f + data.pressure *0.5f);
+
+            fluidGridCompute.SetVector("_ForcePos", forcePosUV);
+            fluidGridCompute.SetVector("_ForceDir", pencilVelocity * currentForceMultiplier);
+            fluidGridCompute.SetFloat("_ForceRadius", currentRadius);
+
+            fluidGridCompute.SetTexture(forceKernel, "_VelocityRead", velocityTx_A);
+            fluidGridCompute.SetTexture(forceKernel, "_VelocityWrite", velocityTx_B);
+            fluidGridCompute.Dispatch(forceKernel, threadGroupsX, threadGroupsY, 1);
+            Swap(ref velocityTx_A, ref velocityTx_B);
+        }
+
+        lastPencilUV = forcePosUV;
     }
 
     // テクスチャのAとBを入れ替える
