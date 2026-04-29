@@ -30,7 +30,7 @@ float _CanvasSize;
 uint _ParticleCount;
 float _DeltaTime;
 
-// 仮のテスト用：マウスインタラクション
+// マウスインタラクション
 float3 _MousePosition;
 float3 _MouseVelocity;
 float _InteractionRadius;
@@ -38,6 +38,11 @@ float _InteractionForce;
 
 //パーティクルリセット用変数
 float _ResetBlend;
+
+//ペンの入力情報
+float2 _PencilUV;      //ペンの現在UV座標
+float _PencilPressure; //筆圧(0~1)
+int _IsPencilActive;   //画面に触れているか(0or1)
 
 [numthreads(256,1,1)]
 void InitParticles (uint3 id : SV_DispatchThreadID)
@@ -165,6 +170,36 @@ void UpdateParticles(uint3 id : SV_DispatchThreadID)
     float halfW = halfH * aspect;
     p.position.x = clamp(p.position.x, -halfW, halfW);
     p.position.y = clamp(p.position.y, -halfH, halfH);
+
+    //7. カーソル(ApplePencil)の視覚的フィードバック
+    //基本は画像本来の色に戻す
+    p.color = _MainTex.SampleLevel(sampler_LinearClamp, p.initialUV, 0);
+
+    //画面に触れている時だけカーソル描画
+    if(_IsPencilActive > 0)
+    {
+        //画面の縦横比を考慮して辺とパーティクルの距離を計算
+        //パーティクルの位置をUV空間に戻して距離を測る
+        float2 currentGridUV = float2((p.position.x / _CanvasSize) / aspect + 0.5, (p.position.y / _CanvasSize) + 0.5);
+
+        //アスペクト比をかけて真円の距離を計算
+        float2 diffUV = (currentGridUV - _PencilUV) * float2(aspect, 1.0);
+        float distToPencil = length(diffUV);
+
+        //カーソルの影響範囲(筆圧に応じて少し広がる)
+        float cursorRadius = 0.02 + (_PencilPressure * 0.03);
+
+        if(distToPencil < cursorRadius)
+        {
+            //距離に応じて中心ほど強くかかる影響度
+            float intensity = 1.0 - (distToPencil / cursorRadius);
+            intensity = smoothstep(0.0, 1.0, intensity); //境界を滑らかに
+
+            //補色によるハイライト
+            float4 invertedColor = float4(1.0 - p.color.rgb, p.color.a);
+            p.color = lerp(p.color, invertedColor, intensity * 0.8);
+        }
+    }
 
     _ParticleBuffer[id.x] = p;
 
