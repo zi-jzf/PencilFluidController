@@ -113,3 +113,4 @@ InitTestScene*.unity*
 PythonServer/.venv/
 PythonServer/__pycache__/
 PythonServer/*.pyc
+PythonServer/checkpoints/*.pt
