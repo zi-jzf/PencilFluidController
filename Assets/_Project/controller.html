@@ -211,13 +211,16 @@
                 return;
             }
 
+            //元画像をJPEG(品質0.8)でエンコードして容量を抑える
+            const base64BaseImage = baseCanvas.toDataURL("image/jpeg", 0.8);
             //キャンバス上の白黒マスク画像を、文字列データ(Base64形式のPNG)に変換
-            const base64ImageData = maskCanvas.toDataURL("image/png");
+            const base64MaskImage = maskCanvas.toDataURL("image/png");
 
-            // Unity側で「ペンのデータ」と「マスク画像」を区別できるよう、type を付ける
+            // 両方の画像をまとめたJSONを作る
             const payload = {
-                type: "mask",
-                imageData: base64ImageData
+                type: "image_pair",
+                baseImageData: base64BaseImage,
+                maskImageData: base64MaskImage
             };
 
             // WebSocketでUnityへ送信
