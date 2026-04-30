@@ -2,6 +2,7 @@ using UnityEngine;
 using WebSocketSharp;
 using WebSocketSharp.Server;
 using System.Collections.Concurrent;
+using System;
 
 //iPadで入力されたデータを保持するクラス
 [System.Serializable]
@@ -13,6 +14,14 @@ public class PencilData
     public float tiltX;
     public float tiltY;
     public bool isPressed;
+}
+
+//マスク画像受信用
+[System.Serializable]
+public class MaskData
+{
+    public string type;
+    public string imageData;
 }
 
 //クライアント(iPad)と接続された際の振る舞いを定義するクラス
@@ -38,6 +47,9 @@ public class PencilReceiver : MonoBehaviour
     //最新の受信データを保持する変数（public staticなので、他のスクリプトからもアクセス可能）
     public static PencilData CurrentData = new PencilData();
 
+    //画像の変換が終わったことを他のスクリプトに知らせるためのイベント
+    public static Action<Texture2D> OnMaskReceived;
+
     void Start()
     {
         //サーバーの立ち上げ
@@ -58,9 +70,48 @@ public class PencilReceiver : MonoBehaviour
         {
             //受信できたか確認するためのデバックログ
             //Debug.Log($"[iPadからの受信データ]: {jsonString}");
+            
+            //届いたデータにmaskという文字が含まれているかどうか
+            //:(コロン)の後のスペースの有無はブラウザや環境によるスペースの有無に対応している
+            if(jsonString.Contains("\"type\":\"mask\"") || jsonString.Contains("\"type\": \"mask\""))
+            {
+                ProcessMaskData(jsonString);
+            }
+            else
+            {
+                //JsonUtilityを使って文字列stringからPencildataオブジェクトに変換
+                JsonUtility.FromJsonOverwrite(jsonString, CurrentData);
+            }
+            
+        }
+    }
 
-            //JsonUtilityを使って文字列stringからPencildataオブジェクトに変換
-            JsonUtility.FromJsonOverwrite(jsonString, CurrentData);
+    //文字列(Base64)からTexture2Dへの変換処理
+    private void ProcessMaskData(string jsonString)
+    {
+        try
+        {
+            // JSONからimageDataの文字列を取り出す
+            MaskData maskData = JsonUtility.FromJson<MaskData>(jsonString);
+            
+            // "data:image/png;base64," のような余計なヘッダー部分を切り捨てる
+            string base64Data = maskData.imageData.Split(',')[1];
+            
+            // 文字列をバイト配列(01のデータ)に変換
+            byte[] imageBytes = Convert.FromBase64String(base64Data);
+
+            // 空のテクスチャを作って、画像データを流し込む（サイズは自動で調整されます）
+            Texture2D maskTexture = new Texture2D(2, 2);
+            maskTexture.LoadImage(imageBytes);
+
+            Debug.Log($"AIマスク画像を正常に受信・変換しました。(サイズ: {maskTexture.width}x{maskTexture.height})");
+
+            // 画像を待っている他のスクリプト（シミュレーション側）にテクスチャを渡す
+            OnMaskReceived?.Invoke(maskTexture);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("マスク画像の変換に失敗しました: " + e.Message);
         }
     }
 

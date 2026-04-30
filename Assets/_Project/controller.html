@@ -18,75 +18,215 @@
             overflow: hidden;
             /* スワイプによるスクロールや戻る動作を無効化 */
             touch-action: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
-        #status {
+        #ui-container {
             position: absolute;
             top: 10px;
             left: 10px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        #canvas-container {
+            position: relative;
+            margin-top: 120px;
+            max-width: 95vw;
+            height: calc(100vh - 140px);
+            display: flex;
+            justify-content: center;
+        }
+
+        /* 選択した写真を表示するキャンバス */
+        #base-canvas {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border: 1px solid #444;
+        }
+
+        /* AIのマスクを重ねるためのキャンバス */
+        #mask-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             pointer-events: none;
+            /* タップ操作は下のbase-canvasを貫通させる */
+            opacity: 0.6;
+            /* 半透明にする */
+            mix-blend-mode: screen;
+            /* 黒を透明化し、白を強調する合成モード */
+        }
+
+        #send-btn {
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            opacity: 0.5;
+            pointer-events: none;
+            /* 最初は押せないようにしておく */
+        }
+
+        #send-btn.active {
+            opacity: 1.0;
+            pointer-events: auto;
+            cursor: pointer;
         }
     </style>
 </head>
 
 <body>
-    <div id="status">Connecting...</div>
+    <div id="ui-container">
+        <div id="status">Unity: Disconnected | AI: Waiting</div>
+        <input type="file" id="image-upload" accept="image/*">
+        <button id="send-btn">Send Mask to Unity</button>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="base-canvas"></canvas>
+        <canvas id="mask-canvas"></canvas>
+    </div>
 
     <script>
         // 自分のIPアドレスを書く
         const PC_IP_ADDRESS = "192.168.11.63";
-        const ws = new WebSocket(`ws://${PC_IP_ADDRESS}:8080/pencil`);
+
+        // --- 状態表示の管理 ---
         const statusDiv = document.getElementById("status");
+        const sendBtn = document.getElementById("send-btn");
+        let unityConnected = false;
 
-        ws.onopen = () => {
-            statusDiv.innerText = "Connected to Unity!";
-            statusDiv.style.color = "#00ff00";
-        };
-
-        ws.onclose = () => {
-            statusDiv.innerText = "Disconnected.";
-            statusDiv.style.color = "#ff0000";
-        };
-
-        ws.onerror = (error) => {
-            statusDiv.innerText = "Connection Error";
-            statusDiv.style.color = "#ff0000";
-        };
-
-        // イベント送信用の関数
-        function sendPointerData(e, isPressed) {
-            if (ws.readyState !== WebSocket.OPEN) return;
-
-            // HTMLの座標(左上原点)を、UnityのUV座標(左下原点)に合わせて変換 (0.0 ~ 1.0)
-            const normalizedX = e.clientX / window.innerWidth;
-            const normalizedY = 1.0 - (e.clientY / window.innerHeight);
-
-            const data = {
-                x: normalizedX,
-                y: normalizedY,
-                pressure: e.pressure, // 筆圧 (0.0 ~ 1.0)
-                tiltX: e.tiltX,       // 傾きX (-90 ~ 90)
-                tiltY: e.tiltY,       // 傾きY (-90 ~ 90)
-                isPressed: isPressed  // 画面に触れているか
-            };
-
-            ws.send(JSON.stringify(data));
+        function updateStatus(aiStatus) {
+            const unityStatus = unityConnected ? "Connected" : "Disconnected";
+            statusDiv.innerText = `Unity: ${unityStatus} | ${aiStatus}`;
+            statusDiv.style.color = aiStatus.includes("Error") ? "#ff4444" : "#ffffff";
         }
 
-        // Pointer Eventsの登録（マウス、タッチ、ペン全てを統合して扱えるAPI）
-        window.addEventListener('pointermove', (e) => {
-            // 画面に触れている(ボタンが押されている)時だけ送信
-            if (e.buttons > 0) {
-                sendPointerData(e, true);
+        // --- WebSocket (Unity宛て: ポート8080) ---
+        // ※今回は画像処理がメインですが、接続維持のために残しておきます
+        const ws = new WebSocket(`ws://${PC_IP_ADDRESS}:8080/pencil`);
+        ws.onopen = () => { unityConnected = true; updateStatus("AI: Waiting"); };
+        ws.onclose = () => { unityConnected = false; updateStatus("AI: Waiting"); };
+
+        // --- キャンバスと画像の準備 ---
+        const baseCanvas = document.getElementById("base-canvas");
+        const maskCanvas = document.getElementById("mask-canvas");
+        const ctxBase = baseCanvas.getContext("2d");
+        const ctxMask = maskCanvas.getContext("2d");
+        const uploadInput = document.getElementById("image-upload");
+
+        let currentImageBlob = null;
+
+        // ① ファイル選択ボタンが押された時の処理
+        uploadInput.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            currentImageBlob = file;
+            const img = new Image();
+            img.onload = () => {
+                // 画像の本来の解像度に合わせてキャンバスのサイズを設定
+                baseCanvas.width = img.width;
+                baseCanvas.height = img.height;
+                maskCanvas.width = img.width;
+                maskCanvas.height = img.height;
+
+                // 画像を描画し、マスク表示をリセット
+                ctxBase.drawImage(img, 0, 0);
+                ctxMask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+                //新しい画像を選んだらボタンを無効化
+                sendBtn.classList.remove("active");
+                sendBtn.innerText = "Send Mask to Unity";
+            };
+            img.src = URL.createObjectURL(file);
+        });
+
+        // ② 画像がタップされた時の処理
+        baseCanvas.addEventListener("pointerdown", async (e) => {
+            if (!currentImageBlob) return;
+
+            // タップされた位置を、キャンバスの左上を(0,0)とした座標に変換
+            const rect = baseCanvas.getBoundingClientRect();
+
+            // XとYを 0.0 ~ 1.0 の割合（UV座標）に正規化する
+            const normalizedX = (e.clientX - rect.left) / rect.width;
+            const normalizedY = (e.clientY - rect.top) / rect.height;
+
+            updateStatus("AI: Processing...");
+            sendBtn.classList.remove("active");
+
+            // Python(FastAPI)に送るためのデータ(荷物)を梱包
+            const formData = new FormData();
+            formData.append("file", currentImageBlob);
+            formData.append("x", normalizedX);
+            formData.append("y", normalizedY);
+
+            try {
+                // ③ Pythonサーバー(ポート5000)へデータをPOST送信し、結果を待つ
+                const response = await fetch(`http://${PC_IP_ADDRESS}:5000/segment`, {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error("AI推論エラー");
+
+                // ④ 返ってきたマスク画像(PNG)を受け取り、上のキャンバスに描画
+                const maskBlob = await response.blob();
+                const maskImg = new Image();
+
+                maskImg.onload = () => {
+                    ctxMask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                    ctxMask.drawImage(maskImg, 0, 0);
+                    updateStatus("AI: Done (Tap again to retry)");
+                    //マスクが生成されたら送信ボタンを有効
+                    sendBtn.classList.add("active");
+                };
+                maskImg.src = URL.createObjectURL(maskBlob);
+
+            } catch (error) {
+                console.error(error);
+                updateStatus("AI: Error");
             }
         });
 
-        window.addEventListener('pointerdown', (e) => {
-            sendPointerData(e, true);
-        });
+        //送信ボタンが押されたときの処理
+        sendBtn.addEventListener("click", () => {
+            if (!unityConnected) {
+                alert("Unityと接続されていません");
+                return;
+            }
 
-        window.addEventListener('pointerup', (e) => {
-            sendPointerData(e, false);
+            //キャンバス上の白黒マスク画像を、文字列データ(Base64形式のPNG)に変換
+            const base64ImageData = maskCanvas.toDataURL("image/png");
+
+            // Unity側で「ペンのデータ」と「マスク画像」を区別できるよう、type を付ける
+            const payload = {
+                type: "mask",
+                imageData: base64ImageData
+            };
+
+            // WebSocketでUnityへ送信
+            ws.send(JSON.stringify(payload));
+
+            // ボタンの表示を変更して送信完了を伝える
+            sendBtn.innerText = "Sent!";
+            sendBtn.classList.remove("active");
+            updateStatus("AI: Mask Sent to Unity");
         });
     </script>
 </body>
