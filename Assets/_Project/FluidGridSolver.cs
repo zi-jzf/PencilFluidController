@@ -199,6 +199,20 @@ public class FluidGridSolver : MonoBehaviour
         b = temp;
     }
 
+    // 外部から障害物マスクを更新するためのメソッド
+    public void UpdateObstacleMask(Texture2D newMask)
+    {
+        obstacleMask = newMask;
+        if (obstacleMask != null)
+        {
+            fluidGridCompute.SetTexture(advectKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(forceKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(divergenceKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(jacobiKernel, "_ObstacleMask", obstacleMask);
+            fluidGridCompute.SetTexture(projectKernel, "_ObstacleMask", obstacleMask);
+        }
+    }
+
     void OnDestroy()
     {
         if (velocityTx_A != null) velocityTx_A.Release();

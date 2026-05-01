@@ -39,34 +39,38 @@
         #canvas-container {
             position: relative;
             margin-top: 120px;
-            max-width: 95vw;
+            width: 100vw;
             height: calc(100vh - 140px);
             display: flex;
             justify-content: center;
+            align-items: center;
         }
 
         /* 選択した写真を表示するキャンバス */
-        #base-canvas {
-            display: block;
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            border: 1px solid #444;
-        }
-
-        /* AIのマスクを重ねるためのキャンバス */
+        #base-canvas,
         #mask-canvas {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            max-width: 95vw;
+            max-height: 100%;
+        }
+
+        #base-canvas {
+            border: 1px solid #444;
+            z-index: 1;
+        }
+
+        #mask-canvas {
+            z-index: 2;
             pointer-events: none;
-            /* タップ操作は下のbase-canvasを貫通させる */
             opacity: 0.6;
-            /* 半透明にする */
             mix-blend-mode: screen;
-            /* 黒を透明化し、白を強調する合成モード */
+        }
+
+        button {
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
         }
 
         #send-btn {
@@ -86,6 +90,13 @@
             pointer-events: auto;
             cursor: pointer;
         }
+
+        #mode-indicator {
+            font-size: 0.9em;
+            color: #aaa;
+            margin-top: 5px;
+            font-weight: bold;
+        }
     </style>
 </head>
 
@@ -94,6 +105,7 @@
         <div id="status">Unity: Disconnected | AI: Waiting</div>
         <input type="file" id="image-upload" accept="image/*">
         <button id="send-btn">Send Mask to Unity</button>
+        <div id="mode-indicator">Mode : Image Selection</div>
     </div>
 
     <div id="canvas-container">
@@ -109,6 +121,7 @@
         const statusDiv = document.getElementById("status");
         const sendBtn = document.getElementById("send-btn");
         let unityConnected = false;
+        let isInteractionSession = false;
 
         function updateStatus(aiStatus) {
             const unityStatus = unityConnected ? "Connected" : "Disconnected";
@@ -129,6 +142,8 @@
         const ctxMask = maskCanvas.getContext("2d");
         const uploadInput = document.getElementById("image-upload");
 
+        const modeIndicator = document.getElementById("mode-indicator");
+
         let currentImageBlob = null;
 
         // ① ファイル選択ボタンが押された時の処理
@@ -137,99 +152,152 @@
             if (!file) return;
 
             currentImageBlob = file;
+
+            //新しい画像を選んだらAI推論モードに戻す
+            isInteractionSession = false;
+            modeIndicator.innerText = "Mode: AI Mask Selection";
+            sendBtn.classList.remove("active");
+            sendBtn.innerText = "Send Mask to Unity";
+
             const img = new Image();
             img.onload = () => {
-                // 画像の本来の解像度に合わせてキャンバスのサイズを設定
-                baseCanvas.width = img.width;
-                baseCanvas.height = img.height;
-                maskCanvas.width = img.width;
-                maskCanvas.height = img.height;
+                try {
+                    //最大解像度を3000pxに制限してリサイズ
+                    const MAX_SIZE = 3000;
+                    let width = img.width;
+                    let height = img.height;
 
-                // 画像を描画し、マスク表示をリセット
-                ctxBase.drawImage(img, 0, 0);
-                ctxMask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                    if (width > MAX_SIZE || height > MAX_SIZE) {
+                        const ratio = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+                        width = Math.floor(width * ratio);
+                        height = Math.floor(height * ratio);
+                        console.log(`Resized to: ${width}x${height}`);
+                    }
 
-                //新しい画像を選んだらボタンを無効化
-                sendBtn.classList.remove("active");
-                sendBtn.innerText = "Send Mask to Unity";
+                    // 画像の本来の解像度に合わせてキャンバスのサイズを設定
+                    baseCanvas.width = width;
+                    baseCanvas.height = height;
+                    maskCanvas.width = width;
+                    maskCanvas.height = height;
+
+                    // 画像を描画し、マスク表示をリセット
+                    ctxBase.drawImage(img, 0, 0, width, height);
+                    ctxMask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                } catch (err) {
+                    alert("描画エラーが発生しました：" + err.message);
+                }
+            };
+            img.onerror = () => {
+                alert("iPadによる画像の読み込みに失敗しました。");
             };
             img.src = URL.createObjectURL(file);
         });
 
-        // ② 画像がタップされた時の処理
-        baseCanvas.addEventListener("pointerdown", async (e) => {
-            if (!currentImageBlob) return;
-
-            // タップされた位置を、キャンバスの左上を(0,0)とした座標に変換
+        // タップ・ドラッグの処理(モードによって分岐)
+        function handlePointerEvent(e, isPressed) {
+            e.preventDefault();
             const rect = baseCanvas.getBoundingClientRect();
+            let normalizedX = (e.clientX - rect.left) / rect.width;
+            let normalizedY = (e.clientY - rect.top) / rect.height;
 
-            // XとYを 0.0 ~ 1.0 の割合（UV座標）に正規化する
-            const normalizedX = (e.clientX - rect.left) / rect.width;
-            const normalizedY = (e.clientY - rect.top) / rect.height;
+            //はみ出し補正
+            normalizedX = Math.max(0, Math.min(1, normalizedX));
+            normalizedY = Math.max(0, Math.min(1, normalizedY));
+
+            if (isInteractionSession) {
+                //Unityへペンデータを送信
+                if (!unityConnected) return;
+
+                // Unityは左下が(0,0)なのでY軸を反転
+                const unityY = 1.0 - normalizedY;
+
+                const payload = {
+                    x: normalizedX,
+                    y: unityY,
+                    pressure: e.pressure || (isPressed ? 0.5 : 0.0),
+                    tiltX: 0,
+                    tiltY: 0,
+                    isPressed: isPressed
+                };
+                ws.send(JSON.stringify(payload));
+            } else {
+                if (isPressed && e.type === "pointerdown") {
+                    requestAISegmentation(normalizedX, normalizedY);
+                }
+            }
+        }
+
+        //ポインターイベントの登録
+        baseCanvas.addEventListener("pointerdown", (e) => handlePointerEvent(e, true));
+        baseCanvas.addEventListener("pointermove", (e) => {
+            if (isInteractionSession && e.buttons > 0) handlePointerEvent(e, true);
+        });
+        baseCanvas.addEventListener("pointerup", (e) => handlePointerEvent(e, false));
+        baseCanvas.addEventListener("pointercancel", (e) => handlePointerEvent(e, false));
+
+        // PythonへのAI推論リクエスト
+        async function requestAISegmentation(x, y) {
+            if (!currentImageBlob) return;
 
             updateStatus("AI: Processing...");
             sendBtn.classList.remove("active");
 
-            // Python(FastAPI)に送るためのデータ(荷物)を梱包
+            //元の生ファイルではなくiPad上でリサイズされたCanvas画像を生成して送信
+            const blob = await new Promise(resolve => baseCanvas.toBlob(resolve, "image/jpeg", 0.9));
+
             const formData = new FormData();
-            formData.append("file", currentImageBlob);
-            formData.append("x", normalizedX);
-            formData.append("y", normalizedY);
+            formData.append("file", blob, "image.jpg");
+            formData.append("x", x);
+            formData.append("y", y);
 
             try {
-                // ③ Pythonサーバー(ポート5000)へデータをPOST送信し、結果を待つ
-                const response = await fetch(`http://${PC_IP_ADDRESS}:5000/segment`, {
-                    method: "POST",
-                    body: formData
-                });
+                const response = await fetch(`http://${PC_IP_ADDRESS}:5000/segment`,
+                    {
+                        method: "POST",
+                        body: formData
+                    });
 
-                if (!response.ok) throw new Error("AI推論エラー");
+                if (!response.ok) throw new Error("AI Error");
 
-                // ④ 返ってきたマスク画像(PNG)を受け取り、上のキャンバスに描画
                 const maskBlob = await response.blob();
                 const maskImg = new Image();
-
                 maskImg.onload = () => {
                     ctxMask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                    ctxMask.drawImage(maskImg, 0, 0);
-                    updateStatus("AI: Done (Tap again to retry)");
-                    //マスクが生成されたら送信ボタンを有効
+                    ctxMask.drawImage(maskImg, 0, 0, maskCanvas.width, maskCanvas.height);
+                    updateStatus("AI: Done");
                     sendBtn.classList.add("active");
                 };
                 maskImg.src = URL.createObjectURL(maskBlob);
-
             } catch (error) {
-                console.error(error);
                 updateStatus("AI: Error");
+                alert("AIサーバーとの通信に失敗しました。PC側でPythonサーバーが動いているか確認してください。");
             }
-        });
+        }
 
-        //送信ボタンが押されたときの処理
+        //Unityへの画像送信
         sendBtn.addEventListener("click", () => {
             if (!unityConnected) {
-                alert("Unityと接続されていません");
+                alert("Unityと接続されていません。");
                 return;
             }
 
-            //元画像をJPEG(品質0.8)でエンコードして容量を抑える
             const base64BaseImage = baseCanvas.toDataURL("image/jpeg", 0.8);
-            //キャンバス上の白黒マスク画像を、文字列データ(Base64形式のPNG)に変換
             const base64MaskImage = maskCanvas.toDataURL("image/png");
 
-            // 両方の画像をまとめたJSONを作る
             const payload = {
                 type: "image_pair",
                 baseImageData: base64BaseImage,
                 maskImageData: base64MaskImage
             };
 
-            // WebSocketでUnityへ送信
             ws.send(JSON.stringify(payload));
 
-            // ボタンの表示を変更して送信完了を伝える
+            // 送信成功後、操作モードへ切り替え
             sendBtn.innerText = "Sent!";
             sendBtn.classList.remove("active");
-            updateStatus("AI: Mask Sent to Unity");
+            isInteractionSession = true;
+            modeIndicator.innerText = "Mode: Fluid Interaction";
+            updateStatus("AI: Waiting");
         });
     </script>
 </body>

@@ -34,6 +34,16 @@ public class FluidSimulationManager : MonoBehaviour
     //マウス入力計算用
     private Vector3 lastMousePos;
 
+    private void OnEnable()
+    {
+        PencilReceiver.OnImagesReceived += OnNewImagesReceived;
+    }
+
+    private void OnDisable()
+    {
+        PencilReceiver.OnImagesReceived -= OnNewImagesReceived;
+    }
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -165,6 +175,52 @@ public class FluidSimulationManager : MonoBehaviour
         }
 
         currentResetBlend = targetValue;
+    }
+
+    private void OnNewImagesReceived(Texture2D newBaseImage, Texture2D newMaskImage)
+    {
+        Debug.Log("新しい画像を流体シミュレーションに適用...");
+
+        // 1. 元画像の差し替えとパーティクル数の再計算
+        sourceImage = newBaseImage;
+        particleCount = sourceImage.width * sourceImage.height;
+
+        // 2. 既存のバッファを破棄
+        ParticleBuffer?.Release();
+        ArgsBuffer?.Release();
+
+        // 3. 新しい解像度に合わせてバッファを再生成
+        int stride = Marshal.SizeOf<ParticleData>();
+        ParticleBuffer = new ComputeBuffer(particleCount, stride);
+        ParticleData[] initialData = new ParticleData[particleCount];
+        ParticleBuffer.SetData(initialData);
+
+        ArgsBuffer = new ComputeBuffer(1, 4 * sizeof(uint), ComputeBufferType.IndirectArguments);
+        ArgsBuffer.SetData(new uint[] { 6, (uint)particleCount, 0, 0 });
+
+        // 4. シェーダーに変数を再設定
+        fluidComputeShader.SetInt("_ParticleCount", particleCount);
+        fluidComputeShader.SetInt("_ResolutionX", sourceImage.width);
+        fluidComputeShader.SetInt("_ResolutionY", sourceImage.height);
+
+        fluidComputeShader.SetTexture(initKernel, "_MainTex", sourceImage);
+        fluidComputeShader.SetBuffer(initKernel, "_ParticleBuffer", ParticleBuffer);
+
+        fluidComputeShader.SetTexture(updateKernel, "_MainTex", sourceImage);
+        fluidComputeShader.SetBuffer(updateKernel, "_ParticleBuffer", ParticleBuffer);
+        fluidComputeShader.SetTexture(updateKernel, "_ObstacleMask", newBaseImage);
+        
+        // 5. FluidGridSover側の障害物マスクも更新する
+        if(gridSolver != null)
+        {
+            gridSolver.UpdateObstacleMask(newMaskImage);
+        }
+
+        // 6. パーティクルを新しい画像で再配置する
+        int threadGroupsX = Mathf.CeilToInt(particleCount / 256.0f);
+        fluidComputeShader.Dispatch(initKernel, threadGroupsX, 1, 1);
+        
+        Debug.Log("流体シミュレーションの更新が完了");
     }
 
     void OnDestroy()
