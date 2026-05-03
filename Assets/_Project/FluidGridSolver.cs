@@ -3,6 +3,11 @@ using UnityEngine.InputSystem;
 
 public class FluidGridSolver : MonoBehaviour
 {
+    public enum InputMode { Mouse, iPad }
+
+    [Header("Input Mode")]
+    public InputMode currentInputMode = InputMode.iPad; 
+
     [Header("Solver Settings")]
     public ComputeShader fluidGridCompute;
     public int resolution = 256; //グリッド自体の解像度(高すぎると重くなる)
@@ -99,8 +104,14 @@ public class FluidGridSolver : MonoBehaviour
         Swap(ref velocityTx_A, ref velocityTx_B);
 
         //Step2: 外力(Add Force) - 入力を反映
-        //ApplyMouseForce(threadGroupsX, threadGroupsY);
-        ApplyPencilForce(threadGroupsX, threadGroupsY);
+        if(currentInputMode == InputMode.Mouse)
+        {
+            ApplyMouseForce(threadGroupsX, threadGroupsY);
+        }
+        else if(currentInputMode == InputMode.iPad)
+        {
+            ApplyPencilForce(threadGroupsX, threadGroupsY);
+        }
         
         //Step3: 発散(Divergence) - どこに流体が密集しているか計算
         fluidGridCompute.SetTexture(divergenceKernel, "_VelocityRead", velocityTx_A);
@@ -133,17 +144,28 @@ public class FluidGridSolver : MonoBehaviour
         if (Mouse.current == null || Camera.main == null) return;
 
         Vector2 mousePos2D = Mouse.current.position.ReadValue();
-        Vector3 mouseScreenPos = new Vector3(mousePos2D.x, mousePos2D.y, Mathf.Abs(Camera.main.transform.position.z));
-        Vector3 currentMousePos = Camera.main.ScreenToWorldPoint(mouseScreenPos);
+        //マウス位置をワールド座標に変換
+        float distance = Mathf.Abs(Camera.main.transform.position.z);
+        Vector3 mouseScreenPos = new Vector3(mousePos2D.x, mousePos2D.y, distance);
+        Vector3 worldPos = Camera.main.ScreenToWorldPoint(mouseScreenPos);
 
-        // 画面の座標系から 0.0 ~ 1.0 のUV空間に変換する処理（仮）
-        // ※ FluidSimulationManagerのキャンバスサイズ等に合わせて後で調整します
-        Vector2 forcePosUV = new Vector2(0.5f + (currentMousePos.x / 10f), 0.5f + (currentMousePos.y / 10f));
+        //ワールド座標を画像のUV空間に逆算
+        float canvasSize = 10.0f; //FluidSimulationManagerのCanvasSizeに合わせる
+        float aspect = obstacleMask != null ? (float)obstacleMask.width / obstacleMask.height : 1.0f;
         
+        Vector2 forcePosUV = new Vector2(
+            (worldPos.x / (canvasSize * aspect)) + 0.5f,
+            (worldPos.y / canvasSize) + 0.5f
+        );
+
+        //画面外の入力を無効化(0~1に収める)
+        forcePosUV.x = Mathf.Clamp01(forcePosUV.x);
+        forcePosUV.y = Mathf.Clamp01(forcePosUV.y);
+
         Vector2 mouseVelocity = Vector2.zero;
         if (Mouse.current.leftButton.isPressed)
         {
-            mouseVelocity = new Vector2(currentMousePos.x - lastMousePos.x, currentMousePos.y - lastMousePos.y) / Time.deltaTime;
+            mouseVelocity = (forcePosUV - (Vector2)lastMousePos) / Time.deltaTime;
         }
 
         fluidGridCompute.SetVector("_ForcePos", forcePosUV);
@@ -155,7 +177,7 @@ public class FluidGridSolver : MonoBehaviour
         fluidGridCompute.Dispatch(forceKernel, threadGroupsX, threadGroupsY, 1);
         Swap(ref velocityTx_A, ref velocityTx_B);
 
-        lastMousePos = currentMousePos;
+        lastMousePos = forcePosUV;
     }
 
     private void ApplyPencilForce(int threadGroupsX, int threadGroupsY)

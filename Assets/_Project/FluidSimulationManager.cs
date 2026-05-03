@@ -111,24 +111,61 @@ public class FluidSimulationManager : MonoBehaviour
         //FluidGridSolverがアタッチされていない、またはテクスチャの準備ができていない場合はスキップ
         if (gridSolver == null || gridSolver.velocityTx_A == null) return;
 
-        //ペンの入力をPencilReceiverから取得
-        PencilData data = PencilReceiver.CurrentData;
-        int isInteracting = (data != null && data.isPressed) ? 1 : 0;
-
         fluidComputeShader.SetFloat("_DeltaTime", Time.deltaTime);
         fluidComputeShader.SetFloat("_ResetBlend", currentResetBlend);
 
-        //カーソル描画用にペンの情報をシェーダーに渡す
-        if (data != null)
+        // 入力モードによる分岐処理
+        if(gridSolver.currentInputMode == FluidGridSolver.InputMode.Mouse)
         {
-            fluidComputeShader.SetVector("_PencilUV", new Vector2(data.x, data.y));
-            fluidComputeShader.SetFloat("_PencilPressure", data.pressure);
-            fluidComputeShader.SetInt("_IsPencilActive", data.isPressed ? 1 : 0);
+            // マウス入力時の処理
+            if(Mouse.current != null && Camera.main != null)
+            {
+                Vector2 mousePos2D = Mouse.current.position.ReadValue();
+                
+                //マウス入力をUV座標に変換
+                float distance = Mathf.Abs(Camera.main.transform.position.z);
+                Vector3 mouseScreenPos = new Vector3(mousePos2D.x, mousePos2D.y, distance);
+                Vector3 worldPos = Camera.main.ScreenToWorldPoint(mouseScreenPos);
+                
+                float canvasAspect = sourceImage != null ? (float)sourceImage.width / sourceImage.height : 1.0f;
+                Vector2 uvPos = new Vector2(
+                    (worldPos.x / (canvasAspect * canvasSize)) + 0.5f,
+                    (worldPos.y / canvasSize) + 0.5f
+                );
+
+                uvPos.x = Mathf.Clamp01(uvPos.x);
+                uvPos.y = Mathf.Clamp01(uvPos.y);
+
+                bool isPressed = Mouse.current.leftButton.isPressed;
+
+                fluidComputeShader.SetVector("_PencilUV", uvPos);
+                // マウスに筆圧は無いので適当な固定値を送る
+                fluidComputeShader.SetFloat("_PencilPressure", isPressed ? 0.5f : 0.0f);
+                fluidComputeShader.SetInt("_IsPencilActive", isPressed ? 1 : 0);
+            }
         }
         else
         {
-            fluidComputeShader.SetInt("_IsPencilActive", 0);
+            //iPad(ApplePencil)入力時の処理
+            //ペンの入力をPencilReceiverから取得
+            PencilData data = PencilReceiver.CurrentData;
+            int isInteracting = (data != null && data.isPressed) ? 1 : 0;
+
+            //カーソル描画用にペンの情報をシェーダーに渡す
+            if (data != null)
+            {
+                fluidComputeShader.SetVector("_PencilUV", new Vector2(data.x, data.y));
+                fluidComputeShader.SetFloat("_PencilPressure", data.pressure);
+                fluidComputeShader.SetInt("_IsPencilActive", data.isPressed ? 1 : 0);
+            }
+            else
+            {
+                fluidComputeShader.SetInt("_IsPencilActive", 0);
+            }
         }
+        
+
+        
 
         // 気象庁（GridSolver）が計算した最新の「風のテクスチャ」を渡す
         fluidComputeShader.SetTexture(updateKernel, "_VelocityField", gridSolver.velocityTx_A);
